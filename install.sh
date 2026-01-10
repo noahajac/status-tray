@@ -9,7 +9,7 @@
 
 set -e
 
-EXTENSION_UUID="status-tray@keithvassallo.mt"
+EXTENSION_UUID="status-tray@keithvassallo.com"
 EXTENSIONS_DIR="$HOME/.local/share/gnome-shell/extensions"
 SRC_DIR="$(cd "$(dirname "$0")/src" && pwd)"
 TARGET_DIR="$EXTENSIONS_DIR/$EXTENSION_UUID"
