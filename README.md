@@ -2,7 +2,7 @@
 
 A GNOME Shell extension that brings back the system tray for applications using StatusNotifierItem (AppIndicator/SNI) protocol.
 
-<!-- SCREENSHOT_PLACEHOLDER: Main screenshot showing Status Tray in action with several tray icons visible in the GNOME panel. Recommended size: 800x100px or similar showing just the panel area. Filename suggestion: screenshot-panel.png -->   
+![Status Tray in action](assets/screenshot-panel.png)   
 
 ## Features
 
@@ -71,7 +71,7 @@ Once installed and enabled, Status Tray automatically appears in your GNOME pane
 1. **Click** on a tray icon to open its menu
 2. **Select** menu items to interact with the application
 
-<!-- SCREENSHOT_PLACEHOLDER: Screenshot showing an open tray menu (e.g., Nextcloud or Discord menu). Recommended size: 400x300px. Filename suggestion: screenshot-menu.png -->
+![Tray menu example](assets/screenshot-menu.png)
 
 ## Configuration
 
@@ -81,7 +81,7 @@ Access settings through GNOME Extensions app or by running:
 gnome-extensions prefs status-tray@keithvassallo.com
 ```
 
-<!-- SCREENSHOT_PLACEHOLDER: Screenshot of the preferences window showing the main settings view with app list. Recommended size: 600x500px. Filename suggestion: screenshot-prefs.png -->
+![Preferences window](assets/screenshot-prefs.png)
 
 ### Icon Mode
 
@@ -92,7 +92,7 @@ Choose how tray icons are displayed:
 | **Symbolic** | Monochrome icons that match your shell theme (default) |
 | **Original** | Full-color icons as provided by applications |
 
-<!-- SCREENSHOT_PLACEHOLDER: Side-by-side comparison showing the same icons in symbolic vs original mode. Recommended size: 400x100px. Filename suggestion: screenshot-icon-modes.png -->
+![Icon modes comparison](assets/screenshot-icon-modes.png)
 
 ### App Management
 
@@ -107,7 +107,7 @@ Override any app's icon with a system icon or custom image:
 2. Search for a system icon or click "Choose File..." for a custom image
 3. Click "Apply" to save
 
-<!-- SCREENSHOT_PLACEHOLDER: Screenshot of the icon picker dialog showing the icon grid and search. Recommended size: 500x400px. Filename suggestion: screenshot-icon-picker.png -->
+![Icon picker dialog](assets/screenshot-icon-picker.png)
 
 ### Icon Effects
 
@@ -118,7 +118,7 @@ Fine-tune how icons appear in symbolic mode:
 - **Contrast** - Adjust icon contrast
 - **Tint** - Apply a custom color tint
 
-<!-- SCREENSHOT_PLACEHOLDER: Screenshot of the icon effect dialog showing the sliders and preview. Recommended size: 400x350px. Filename suggestion: screenshot-effects.png -->
+![Icon effects dialog](assets/screenshot-effects.png)
 
 ## How It Works
 

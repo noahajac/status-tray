@@ -1740,15 +1740,27 @@ export default class StatusTrayExtension extends Extension {
         }
 
         // Re-add items that are now enabled (from watcher's list)
+        let itemsAdded = false;
         if (this._watcher) {
             for (const uniqueId of this._watcher.RegisteredStatusNotifierItems) {
                 if (!this._items.has(uniqueId)) {
                     const itemInfo = this._watcher._items.get(uniqueId);
                     if (itemInfo) {
                         this._onItemRegistered(uniqueId, itemInfo.busName, itemInfo.objectPath);
+                        itemsAdded = true;
                     }
                 }
             }
+        }
+
+        // If items were added, reorder all to ensure correct positioning
+        // This is needed because GNOME Shell doesn't re-sort panel items when new ones are added
+        if (itemsAdded) {
+            // Use a short delay to let the new items fully initialize
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                this._reorderItems();
+                return GLib.SOURCE_REMOVE;
+            });
         }
     }
 
@@ -1793,29 +1805,22 @@ export default class StatusTrayExtension extends Extension {
 
     /**
      * Calculate the panel position for a tray item based on app-order setting
-     * Higher positions appear further LEFT in the panel (away from system icons)
-     * We use a base position to ensure tray icons appear left of system indicators
+     * LOWER positions appear further LEFT in the panel box (index 0 = leftmost)
+     * HIGHER positions appear further RIGHT (closer to edge)
+     * We use position 0 to place tray icons at the leftmost position in the right box
      */
     _calculatePosition(appId) {
-        // Base position offset to place tray icons left of system indicators
-        // QuickSettings and other system indicators use low position values (0-1)
-        // By using a higher base, tray icons appear to their left
-        // Using a much higher value to ensure clear separation
-        const BASE_POSITION = 10;
-
         const appOrder = this._settings.get_strv('app-order');
         const orderIndex = appOrder.indexOf(appId);
 
         if (orderIndex === -1) {
-            // Items not in app-order get base position (leftmost among Status Tray icons
-            // but still to the left of system indicators)
-            return BASE_POSITION;
+            // Items not in app-order get position 0 (leftmost in right box)
+            return 0;
         }
 
-        // Items at the start of app-order (index 0) should appear leftmost (higher position)
-        // Items at the end should appear rightmost (lower position, but still > 0)
-        // We reverse the index so first item in list gets highest position
-        return BASE_POSITION + (appOrder.length - orderIndex);
+        // Items at the start of app-order (index 0) should appear leftmost (position 0)
+        // Items at the end should appear rightmost (higher position index)
+        return orderIndex;
     }
 
     /**
@@ -1859,10 +1864,8 @@ export default class StatusTrayExtension extends Extension {
         });
 
         // Re-create items in sorted order
-        // Higher position = further left, so first item gets highest position
+        // Position 0 = leftmost in the right box, higher positions = further right
         const disabledApps = this._settings.get_strv('disabled-apps');
-        const totalItems = itemsInfo.length;
-
         for (let i = 0; i < itemsInfo.length; i++) {
             const { uniqueId, busName, objectPath, appId } = itemsInfo[i];
 
@@ -1874,7 +1877,16 @@ export default class StatusTrayExtension extends Extension {
             const trayItem = new TrayItem(busName, objectPath, this._settings);
             this._items.set(uniqueId, trayItem);
 
-            const position = totalItems - i;
+            // Listen for appId resolution to update watcher's stored appId
+            trayItem.connect('appid-resolved', (item, resolvedAppId) => {
+                if (this._watcher) {
+                    this._watcher.updateItemAppId(uniqueId, resolvedAppId);
+                }
+            });
+
+            // Use index as position - items are already sorted by app-order
+            // so index 0 gets position 0 (leftmost), etc.
+            const position = i;
             Main.panel.addToStatusArea(`StatusTray-${uniqueId}`, trayItem, position, 'right');
             debug(`Reordered TrayItem: ${appId} at position ${position}`);
         }
