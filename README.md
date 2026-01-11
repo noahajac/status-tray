@@ -131,6 +131,13 @@ Status Tray implements the StatusNotifierItem (SNI) protocol, the modern replace
 - **Electron Support** - Handles Electron/Chromium apps that use custom icon paths
 - **Flatpak Compatible** - Gracefully handles sandboxed applications
 
+### Design Choices
+
+- **SNI proxy first** - Uses `Gio.DBusProxy` with interface XML, falls back to direct calls for non-standard implementations
+- **Name owner resolution** - Resolves well-known bus names to unique owners during registration, with sender fallback
+- **Menu refresh** - Calls `AboutToShow` before `GetLayout` and keeps a placeholder until layout succeeds
+- **Icon pipeline** - Prefers `IconName`, then `IconThemePath` file lookup, then `IconPixmap`
+
 ## Troubleshooting
 
 ### Icons not appearing
@@ -162,6 +169,14 @@ Some applications may take a moment to initialize their menus. If clicking has n
 ```bash
 journalctl -f -o cat /usr/bin/gnome-shell 2>&1 | grep -i status-tray
 ```
+
+## Manual Verification
+
+1. Install and reload GNOME Shell (X11: `Alt+F2` → `r`, Wayland: log out/in).
+2. Launch a known SNI app (e.g., Dropbox, Slack, Telegram) and confirm the icon appears.
+3. Click the icon and verify the menu opens and actions trigger.
+4. Toggle Icon Mode in preferences and confirm the icon restyles immediately.
+5. Disable the app in preferences and confirm the icon hides, then re-enable.
 
 ## Contributing
 

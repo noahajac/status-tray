@@ -174,14 +174,12 @@ const TrayItem = GObject.registerClass({
     },
 }, class TrayItem extends PanelMenu.Button {
     _init(busName, objectPath, settings) {
-        // Extract a readable ID from the bus name or path for accessibility
         const itemId = this._extractId(busName, objectPath);
         super._init(0.0, `StatusTray-${itemId}`);
 
         this._busName = busName;
         this._objectPath = objectPath;
         this._menuPath = null;  // Will be fetched from SNI Menu property
-        this._iconName = null;
         this._iconThemePath = null;
         this._settings = settings;
         this._proxy = null;
@@ -191,26 +189,20 @@ const TrayItem = GObject.registerClass({
         // This is a preliminary ID; will be updated with SNI Id property when available
         this._appId = this._extractId(busName, objectPath);
 
-        // Signal subscription IDs for cleanup
         this._signalIds = [];
 
-        // Track temp file path for cleanup
         this._tempFilePath = null;
 
-        // Create icon widget with fallback
         this._icon = new St.Icon({
             style_class: 'system-status-icon status-tray-icon',
             fallback_icon_name: FALLBACK_ICON_NAME,
         });
         this.add_child(this._icon);
 
-        // Set a temporary icon while we fetch the real one
         this._icon.set_icon_name(FALLBACK_ICON_NAME);
 
-        // Add our style class
         this.add_style_class_name('status-tray-button');
 
-        // Connect to the SNI using a proxy (more robust for quirky apps)
         this._initProxy();
 
         // Add a placeholder item so the menu isn't empty
@@ -254,7 +246,6 @@ const TrayItem = GObject.registerClass({
      */
     async _initProxy() {
         try {
-            // Create proxy with interface info for better compatibility
             this._proxy = new Gio.DBusProxy({
                 g_connection: Gio.DBus.session,
                 g_name: this._busName,
@@ -264,7 +255,6 @@ const TrayItem = GObject.registerClass({
                 g_flags: Gio.DBusProxyFlags.GET_INVALIDATED_PROPERTIES,
             });
 
-            // Initialize the proxy asynchronously
             await new Promise((resolve, reject) => {
                 this._proxy.init_async(GLib.PRIORITY_DEFAULT, this._cancellable, (proxy, result) => {
                     try {
@@ -278,7 +268,6 @@ const TrayItem = GObject.registerClass({
 
             debug(`Proxy initialized for ${this._busName}`);
 
-            // Connect to property changes
             this._proxy.connect('g-properties-changed', (proxy, changed, invalidated) => {
                 const props = Object.keys(changed.deep_unpack());
                 debug(`Properties changed for ${this._busName}: ${props.join(', ')}`);
@@ -288,13 +277,11 @@ const TrayItem = GObject.registerClass({
                 }
             });
 
-            // Now fetch properties
             this._fetchPropertiesFromProxy();
             this._subscribeToSignals();
 
         } catch (e) {
             debug(`Failed to initialize proxy for ${this._busName}: ${e.message}`);
-            // Fall back to direct D-Bus calls
             this._connectToSNIFallback();
         }
     }
@@ -317,21 +304,18 @@ const TrayItem = GObject.registerClass({
             }
         }
 
-        // Get IconThemePath
         const iconThemePath = this._proxy.get_cached_property('IconThemePath');
         if (iconThemePath) {
             this._iconThemePath = iconThemePath.deep_unpack();
             debug(`Got IconThemePath from proxy: ${this._iconThemePath}`);
         }
 
-        // Get Menu path
         const menuPath = this._proxy.get_cached_property('Menu');
         if (menuPath) {
             this._menuPath = menuPath.deep_unpack();
             debug(`Got Menu path from proxy: ${this._menuPath}`);
         }
 
-        // Update the icon
         this._updateIcon();
     }
 
@@ -361,7 +345,6 @@ const TrayItem = GObject.registerClass({
             return;
         }
 
-        // Try IconName first
         const iconNameVariant = this._proxy.get_cached_property('IconName');
         debug(`IconName variant: ${iconNameVariant}`);
         if (iconNameVariant) {
@@ -378,7 +361,6 @@ const TrayItem = GObject.registerClass({
             }
         }
 
-        // Try IconPixmap
         const iconPixmapVariant = this._proxy.get_cached_property('IconPixmap');
         if (iconPixmapVariant) {
             debug(`Got IconPixmap from proxy, processing...`);
@@ -386,7 +368,6 @@ const TrayItem = GObject.registerClass({
             return;
         }
 
-        // If proxy doesn't have cached properties, try direct fetch
         debug(`No cached icon properties for ${this._busName}, trying direct fetch`);
         this._fetchIconDirect();
     }
@@ -397,7 +378,6 @@ const TrayItem = GObject.registerClass({
     _fetchIconDirect() {
         const bus = Gio.DBus.session;
 
-        // First get IconThemePath (for Electron apps)
         bus.call(
             this._busName,
             this._objectPath,
@@ -495,7 +475,6 @@ const TrayItem = GObject.registerClass({
 
     /**
      * Try to fetch IconPixmap, with fallback to system icon theme lookup
-     * Used when IconThemePath is inaccessible (e.g., Flatpak sandboxed apps)
      */
     _fetchIconPixmapWithFallback(iconName) {
         const bus = Gio.DBus.session;
@@ -520,7 +499,6 @@ const TrayItem = GObject.registerClass({
                         debug(`Got IconPixmap for sandboxed app`);
                         this._setIconFromPixmap(variant);
                     } else {
-                        // No pixmap data, fall back to system theme
                         debug(`No IconPixmap available, using system theme for: ${iconName}`);
                         this._icon.set_icon_name(iconName);
                         this._applySymbolicStyle();
@@ -528,7 +506,6 @@ const TrayItem = GObject.registerClass({
                 } catch (e) {
                     if (!e.message?.includes('CANCELLED')) {
                         debug(`IconPixmap failed for sandboxed app: ${e.message}`);
-                        // Fall back to system theme lookup
                         debug(`Falling back to system theme for: ${iconName}`);
                         this._icon.set_icon_name(iconName);
                         this._applySymbolicStyle();
@@ -544,7 +521,6 @@ const TrayItem = GObject.registerClass({
     _subscribeToSignals() {
         const bus = Gio.DBus.session;
 
-        // Subscribe to NewIcon signal
         const newIconId = bus.signal_subscribe(
             this._busName,
             'org.kde.StatusNotifierItem',
@@ -564,7 +540,6 @@ const TrayItem = GObject.registerClass({
         );
         this._signalIds.push(newIconId);
 
-        // Subscribe to NewStatus signal
         const newStatusId = bus.signal_subscribe(
             this._busName,
             'org.kde.StatusNotifierItem',
@@ -579,7 +554,6 @@ const TrayItem = GObject.registerClass({
         );
         this._signalIds.push(newStatusId);
 
-        // Watch for bus name disappearing
         const nameWatchId = bus.signal_subscribe(
             'org.freedesktop.DBus',
             'org.freedesktop.DBus',
@@ -688,10 +662,8 @@ const TrayItem = GObject.registerClass({
     _setIcon(iconName) {
         debug(`_setIcon called with: ${iconName}, themePath: ${this._iconThemePath}`);
 
-        // Clear any previous content (from St.ImageContent)
         this._icon.content = null;
 
-        // Check if it's already a file path
         if (iconName.startsWith('/')) {
             const file = Gio.File.new_for_path(iconName);
             if (file.query_exists(null)) {
@@ -705,7 +677,6 @@ const TrayItem = GObject.registerClass({
             }
         }
 
-        // For Electron/Chromium apps, check IconThemePath for the actual file
         if (this._iconThemePath && this._iconThemePath.length > 0) {
             const possiblePaths = [
                 `${this._iconThemePath}/${iconName}.png`,
@@ -727,15 +698,11 @@ const TrayItem = GObject.registerClass({
             }
             debug(`No icon file found in IconThemePath: ${this._iconThemePath}`);
 
-            // IconThemePath exists but icon file not found
-            // This often happens with Flatpak apps where the path is inside the sandbox
-            // Try fetching IconPixmap as fallback, then fall back to system theme
             debug(`IconThemePath inaccessible (possibly sandboxed), trying IconPixmap`);
             this._fetchIconPixmapWithFallback(iconName);
             return;
         }
 
-        // Fallback: use icon name directly (system theme lookup)
         debug(`Using system icon theme lookup for: ${iconName}`);
         this._icon.set_icon_name(iconName);
         this._applySymbolicStyle();
@@ -748,10 +715,8 @@ const TrayItem = GObject.registerClass({
      * Supports per-app effect customization via icon-effect-overrides setting
      */
     _applySymbolicStyle() {
-        // Check settings for icon mode
         const iconMode = this._settings?.get_string('icon-mode') ?? 'symbolic';
         if (iconMode !== 'symbolic') {
-            // Original mode - remove any effects and return
             this._icon.clear_effects();
             this._icon.set_style('icon-size: 16px;');
             return;
@@ -759,14 +724,12 @@ const TrayItem = GObject.registerClass({
 
         const dark = isDarkMode();
 
-        // Default effect values
         let desaturation = 1.0;
         let brightness = dark ? 0.5 : -0.5;
         let contrast = 0.6;
         let useTint = false;
         let tintColor = [1.0, 1.0, 1.0];  // White default
 
-        // Check for per-app effect overrides
         try {
             const effectOverrides = this._settings?.get_value('icon-effect-overrides')?.deep_unpack() ?? {};
             const overrideJson = effectOverrides[this._appId];
@@ -782,22 +745,18 @@ const TrayItem = GObject.registerClass({
             debug(`Failed to parse effect override for ${this._appId}: ${e.message}`);
         }
 
-        // Remove any existing effects first
         this._icon.clear_effects();
 
-        // Step 1: Desaturate to grayscale (if desaturation > 0)
         if (desaturation > 0) {
             const desaturate = new Clutter.DesaturateEffect({ factor: desaturation });
             this._icon.add_effect_with_name('desaturate', desaturate);
         }
 
-        // Step 2: Adjust brightness/contrast
         const bc = new Clutter.BrightnessContrastEffect();
         bc.set_contrast_full(contrast, contrast, contrast);
         bc.set_brightness_full(brightness, brightness, brightness);
         this._icon.add_effect_with_name('brightness', bc);
 
-        // Step 3: Optional tint colour using Clutter.ColorizeEffect
         if (useTint && tintColor) {
             try {
                 const colorize = new Clutter.ColorizeEffect({
@@ -824,10 +783,8 @@ const TrayItem = GObject.registerClass({
      */
     _setIconFromPixmap(pixmapVariant) {
         try {
-            // Handle both array format (from deep_unpack) and GVariant format (from proxy)
             let pixmaps;
             if (pixmapVariant instanceof GLib.Variant) {
-                // Need to iterate through the variant array
                 const numChildren = pixmapVariant.n_children();
                 if (numChildren === 0) {
                     debug(`Empty IconPixmap for ${this._busName}`);
@@ -843,7 +800,6 @@ const TrayItem = GObject.registerClass({
                     pixmaps.push({ width, height, data });
                 }
             } else {
-                // Already unpacked array
                 pixmaps = pixmapVariant;
                 if (!pixmaps || pixmaps.length === 0) {
                     debug(`No IconPixmap data for ${this._busName}`);
@@ -851,7 +807,6 @@ const TrayItem = GObject.registerClass({
                 }
             }
 
-            // Pick the best size - prefer something close to 22-32px for panel
             let bestPixmap = pixmaps[0];
             let bestSize = bestPixmap.width ?? bestPixmap[0];
             const targetSize = 22;
@@ -873,14 +828,12 @@ const TrayItem = GObject.registerClass({
 
             debug(`Using IconPixmap ${width}x${height} for ${this._busName}`);
 
-            // Try using St.ImageContent with ARGB format (like AppIndicator)
             try {
                 const imageContent = new St.ImageContent({
                     preferred_width: width,
                     preferred_height: height,
                 });
 
-                // Get pixel bytes - handle both GLib.Bytes and Uint8Array
                 let pixelBytes;
                 if (pixelData instanceof GLib.Bytes) {
                     pixelBytes = pixelData;
@@ -890,7 +843,6 @@ const TrayItem = GObject.registerClass({
                     pixelBytes = GLib.Bytes.new(pixelData);
                 }
 
-                // Use set_bytes with ARGB format (no conversion needed!)
                 // Check if we need to pass cogl context (GNOME 48+)
                 const mutterBackend = global.stage?.context?.get_backend?.();
                 if (imageContent.set_bytes.length === 6 && mutterBackend?.get_cogl_context) {
@@ -912,7 +864,6 @@ const TrayItem = GObject.registerClass({
                     );
                 }
 
-                // Apply to icon using content
                 const scaleFactor = St.ThemeContext.get_for_stage(global.stage).scale_factor;
                 const scaledSize = 16 * scaleFactor;
 
@@ -923,7 +874,6 @@ const TrayItem = GObject.registerClass({
                     content_gravity: Clutter.ContentGravity.RESIZE_ASPECT,
                 });
 
-                // Clear any previous gicon
                 this._icon.gicon = null;
 
                 this._applySymbolicStyle();
@@ -934,7 +884,6 @@ const TrayItem = GObject.registerClass({
                 debug(`St.ImageContent failed, falling back to temp file: ${stError.message}`);
             }
 
-            // Fallback: Convert to RGBA and save as temp PNG file
             const pixelDataArray = pixelData instanceof GLib.Bytes
                 ? new Uint8Array(pixelData.get_data())
                 : (pixelData.get_data_as_bytes
@@ -959,7 +908,6 @@ const TrayItem = GObject.registerClass({
             ]);
             pixbuf.savev(tempPath, 'png', [], []);
 
-            // Track temp file for cleanup in destroy()
             this._tempFilePath = tempPath;
 
             const file = Gio.File.new_for_path(tempPath);
@@ -1011,8 +959,13 @@ const TrayItem = GObject.registerClass({
             return;
         }
 
-        // Clear existing menu items (except the title if we want one)
+        // Clear existing menu items and show a loading placeholder
         this.menu.removeAll();
+        const loadingItem = new PopupMenu.PopupMenuItem('Loading...', {
+            reactive: false,
+            style_class: 'popup-inactive-menu-item',
+        });
+        this.menu.addMenuItem(loadingItem);
 
         const bus = Gio.DBus.session;
 
@@ -1068,6 +1021,8 @@ const TrayItem = GObject.registerClass({
                     const reply = conn.call_finish(result);
                     const [revision, layout] = reply.deep_unpack();
                     debug(`Got menu layout, revision ${revision}`);
+                    // Clear loading placeholder before rendering the menu
+                    this.menu.removeAll();
                     this._buildMenuFromLayout(layout);
                 } catch (e) {
                     debug(`Failed to get menu layout: ${e}`);
@@ -1077,16 +1032,13 @@ const TrayItem = GObject.registerClass({
     }
 
     _buildMenuFromLayout(layout) {
-        // layout is (ia{sv}av) = (id, properties, children)
         const [rootId, rootProps, children] = layout;
 
-        // Process children of the root item
         if (!children || children.length === 0) {
             debug('Menu has no items');
             return;
         }
 
-        // Track last item type to avoid consecutive separators
         this._lastMenuItemType = null;
 
         for (const childVariant of children) {
@@ -1098,7 +1050,6 @@ const TrayItem = GObject.registerClass({
     _addMenuItem(item) {
         const [itemId, properties, children] = item;
 
-        // Extract properties
         const rawLabel = properties['label']?.deep_unpack() || '';
         const label = stripMnemonics(rawLabel);
         const visible = properties['visible']?.deep_unpack() ?? true;
@@ -1106,13 +1057,11 @@ const TrayItem = GObject.registerClass({
         const type = properties['type']?.deep_unpack() || '';
         const childrenDisplay = properties['children-display']?.deep_unpack() || '';
 
-        // Skip invisible items
         if (!visible) {
             debug(`Skipping invisible item: ${label} (id=${itemId})`);
             return;
         }
 
-        // Skip root-level container items (but process their children)
         if (label === '' && itemId === 0) {
             if (children && children.length > 0) {
                 for (const childVariant of children) {
@@ -1123,7 +1072,6 @@ const TrayItem = GObject.registerClass({
             return;
         }
 
-        // Handle separators - skip consecutive ones
         if (type === 'separator' || label === '') {
             if (this._lastMenuItemType === 'separator') {
                 debug(`Skipping consecutive separator (id=${itemId})`);
@@ -1134,7 +1082,6 @@ const TrayItem = GObject.registerClass({
             return;
         }
 
-        // Handle submenus
         if (childrenDisplay === 'submenu' && children && children.length > 0) {
             const subMenu = new PopupMenu.PopupSubMenuMenuItem(label);
             if (!enabled) {
@@ -1151,13 +1098,11 @@ const TrayItem = GObject.registerClass({
             return;
         }
 
-        // Regular menu item
         const menuItem = new PopupMenu.PopupMenuItem(label);
         if (!enabled) {
             menuItem.setSensitive(false);
         }
 
-        // Connect activation handler
         menuItem.connect('activate', () => {
             this._activateMenuItem(itemId, label);
         });
@@ -1165,7 +1110,6 @@ const TrayItem = GObject.registerClass({
         this.menu.addMenuItem(menuItem);
         this._lastMenuItemType = 'item';
 
-        // Process children if any (even if not a submenu - some apps nest items)
         if (children && children.length > 0) {
             for (const childVariant of children) {
                 const child = childVariant.deep_unpack();
@@ -1207,7 +1151,6 @@ const TrayItem = GObject.registerClass({
 
         const bus = Gio.DBus.session;
 
-        // DBusMenu Event call: Event(id, event_type, data, timestamp)
         bus.call(
             this._busName,
             this._menuPath,
@@ -1281,11 +1224,9 @@ class StatusNotifierWatcher {
         this._nameOwnerChangedIds = new Map();  // busName -> signalId
         this._cancellable = new Gio.Cancellable();
 
-        // Parse interface XML
         const nodeInfo = Gio.DBusNodeInfo.new_for_xml(SNW_INTERFACE_XML);
         const ifaceInfo = nodeInfo.lookup_interface('org.kde.StatusNotifierWatcher');
 
-        // Create the D-Bus implementation object
         this._dbusImpl = Gio.DBusExportedObject.wrapJSObject(ifaceInfo, this);
 
         try {
@@ -1295,13 +1236,11 @@ class StatusNotifierWatcher {
             debug(`Failed to export StatusNotifierWatcher: ${e.message}`);
         }
 
-        // Own the bus name
         this._ownNameId = Gio.DBus.session.own_name(
             WATCHER_BUS_NAME,
             Gio.BusNameOwnerFlags.NONE,
             () => {
                 debug(`Acquired bus name: ${WATCHER_BUS_NAME}`);
-                // Emit host registered signal so apps know we're ready
                 try {
                     this._dbusImpl.emit_signal('StatusNotifierHostRegistered', null);
                 } catch (e) {
@@ -1313,7 +1252,6 @@ class StatusNotifierWatcher {
             }
         );
 
-        // Look for any items that registered before we started
         this._seekExistingItems();
     }
 
@@ -1325,7 +1263,6 @@ class StatusNotifierWatcher {
         try {
             const bus = Gio.DBus.session;
 
-            // Get list of all names on the bus
             const result = await new Promise((resolve, reject) => {
                 bus.call(
                     'org.freedesktop.DBus',
@@ -1349,10 +1286,8 @@ class StatusNotifierWatcher {
 
             const [names] = result.deep_unpack();
 
-            // Check each name for StatusNotifierItem interface
             for (const name of names) {
                 if (name.startsWith(':')) {
-                    // Check if this connection has a /StatusNotifierItem object
                     try {
                         await this._checkForSNI(name, DEFAULT_ITEM_OBJECT_PATH);
                     } catch (e) {
@@ -1370,7 +1305,6 @@ class StatusNotifierWatcher {
     async _checkForSNI(busName, objectPath) {
         const bus = Gio.DBus.session;
 
-        // Try to get the IconName property - if it works, there's an SNI there
         try {
             await new Promise((resolve, reject) => {
                 bus.call(
@@ -1394,14 +1328,12 @@ class StatusNotifierWatcher {
                 );
             });
 
-            // If we got here, there's an SNI at this path
             const uniqueId = `${busName}${objectPath}`;
             if (!this._items.has(uniqueId)) {
                 debug(`Found existing SNI: ${uniqueId}`);
                 this._registerItemInternal(busName, objectPath);
             }
         } catch (e) {
-            // No SNI here, that's fine
         }
     }
 
@@ -1409,7 +1341,7 @@ class StatusNotifierWatcher {
      * D-Bus method: RegisterStatusNotifierItem
      * Called by apps when they want to register a tray icon
      */
-    RegisterStatusNotifierItemAsync(params, invocation) {
+    async RegisterStatusNotifierItemAsync(params, invocation) {
         const [service] = params;
         let busName, objectPath;
 
@@ -1420,8 +1352,8 @@ class StatusNotifierWatcher {
             busName = invocation.get_sender();
             objectPath = service;
         } else if (BUS_ADDRESS_REGEX.test(service)) {
-            // It's a well-known bus name - need to resolve to unique name
-            busName = invocation.get_sender();  // Use sender for now
+            // It's a well-known bus name - resolve to unique name
+            busName = await this._resolveNameOwner(service, invocation);
             objectPath = DEFAULT_ITEM_OBJECT_PATH;
         } else {
             // Assume it's a unique bus name
@@ -1440,6 +1372,47 @@ class StatusNotifierWatcher {
         }
     }
 
+    async _resolveNameOwner(service, invocation) {
+        try {
+            const bus = Gio.DBus.session;
+            const result = await new Promise((resolve, reject) => {
+                bus.call(
+                    'org.freedesktop.DBus',
+                    '/org/freedesktop/DBus',
+                    'org.freedesktop.DBus',
+                    'GetNameOwner',
+                    new GLib.Variant('(s)', [service]),
+                    new GLib.VariantType('(s)'),
+                    Gio.DBusCallFlags.NONE,
+                    1000,
+                    this._cancellable,
+                    (conn, res) => {
+                        try {
+                            resolve(conn.call_finish(res));
+                        } catch (e) {
+                            reject(e);
+                        }
+                    }
+                );
+            });
+            const [owner] = result.deep_unpack();
+            return owner || invocation.get_sender();
+        } catch (e) {
+            debug(`Failed to resolve name owner for ${service}: ${e.message}`);
+            return invocation.get_sender();
+        }
+    }
+
+    getItemInfo(uniqueId) {
+        const itemInfo = this._items.get(uniqueId);
+        if (!itemInfo) return null;
+        return {
+            busName: itemInfo.busName,
+            objectPath: itemInfo.objectPath,
+            appId: itemInfo.appId,
+        };
+    }
+
     _registerItemInternal(busName, objectPath) {
         const uniqueId = `${busName}${objectPath}`;
 
@@ -1448,10 +1421,8 @@ class StatusNotifierWatcher {
             return;
         }
 
-        // Store item info with appId (will be updated later with SNI Id if available)
         this._items.set(uniqueId, { busName, objectPath, appId: null });
 
-        // Watch for the bus name to disappear
         const signalId = Gio.DBus.session.signal_subscribe(
             'org.freedesktop.DBus',
             'org.freedesktop.DBus',
@@ -1469,7 +1440,6 @@ class StatusNotifierWatcher {
         );
         this._nameOwnerChangedIds.set(uniqueId, signalId);
 
-        // Emit signal
         try {
             this._dbusImpl.emit_signal('StatusNotifierItemRegistered',
                 new GLib.Variant('(s)', [uniqueId]));
@@ -1477,7 +1447,6 @@ class StatusNotifierWatcher {
             debug(`Failed to emit StatusNotifierItemRegistered: ${e.message}`);
         }
 
-        // Notify the extension
         this._extension._onItemRegistered(uniqueId, busName, objectPath);
     }
 
@@ -1488,14 +1457,12 @@ class StatusNotifierWatcher {
 
         this._items.delete(uniqueId);
 
-        // Unsubscribe from name owner changes
         const signalId = this._nameOwnerChangedIds.get(uniqueId);
         if (signalId) {
             Gio.DBus.session.signal_unsubscribe(signalId);
             this._nameOwnerChangedIds.delete(uniqueId);
         }
 
-        // Emit signal
         try {
             this._dbusImpl.emit_signal('StatusNotifierItemUnregistered',
                 new GLib.Variant('(s)', [uniqueId]));
@@ -1503,7 +1470,6 @@ class StatusNotifierWatcher {
             debug(`Failed to emit StatusNotifierItemUnregistered: ${e.message}`);
         }
 
-        // Notify the extension
         this._extension._onItemUnregistered(uniqueId);
     }
 
@@ -1555,34 +1521,27 @@ class StatusNotifierWatcher {
 
         this._cancellable.cancel();
 
-        // Emit host unregistered signal
         try {
             this._dbusImpl.emit_signal('StatusNotifierHostUnregistered', null);
         } catch (e) {
-            // Ignore
         }
 
-        // Unsubscribe from all name owner changes
         for (const signalId of this._nameOwnerChangedIds.values()) {
             try {
                 Gio.DBus.session.signal_unsubscribe(signalId);
             } catch (e) {
-                // Ignore
             }
         }
         this._nameOwnerChangedIds.clear();
 
-        // Release bus name
         if (this._ownNameId) {
             Gio.DBus.session.unown_name(this._ownNameId);
             this._ownNameId = 0;
         }
 
-        // Unexport D-Bus object
         try {
             this._dbusImpl.unexport();
         } catch (e) {
-            // Ignore
         }
 
         this._items.clear();
@@ -1599,19 +1558,14 @@ export default class StatusTrayExtension extends Extension {
     enable() {
         debug('Extension enabling...');
 
-        // Load settings
         this._settings = this.getSettings();
 
-        // Map of uniqueId -> TrayItem
         this._items = new Map();
 
-        // Timeout ID for batched reordering
         this._reorderTimeoutId = null;
 
-        // GSettings signal connection IDs
         this._settingsConnections = [];
 
-        // Connect to settings changes
         this._settingsConnections.push(
             this._settings.connect('changed::disabled-apps', () => {
                 debug('disabled-apps setting changed');
@@ -1647,8 +1601,6 @@ export default class StatusTrayExtension extends Extension {
             })
         );
 
-        // Create our own StatusNotifierWatcher
-        // This makes the extension independent of any external daemon
         this._watcher = new StatusNotifierWatcher(this);
 
         debug('Extension enabled');
@@ -1657,26 +1609,22 @@ export default class StatusTrayExtension extends Extension {
     disable() {
         debug('Extension disabling...');
 
-        // Destroy the watcher first (this will trigger unregistration of items)
         if (this._watcher) {
             this._watcher.destroy();
             this._watcher = null;
         }
 
-        // Cancel any pending reorder timeout
         if (this._reorderTimeoutId) {
             GLib.source_remove(this._reorderTimeoutId);
             this._reorderTimeoutId = null;
         }
 
-        // Disconnect settings signals
         for (const id of this._settingsConnections) {
             this._settings.disconnect(id);
         }
         this._settingsConnections = [];
         this._settings = null;
 
-        // Destroy all TrayItems
         for (const [key, item] of this._items) {
             item.destroy();
         }
@@ -1691,15 +1639,12 @@ export default class StatusTrayExtension extends Extension {
     _onItemRegistered(uniqueId, busName, objectPath) {
         debug(`Item registered: ${uniqueId}`);
 
-        // Check if disabled in settings - check both extracted appId and stored appId from watcher
         const disabledApps = this._settings.get_strv('disabled-apps');
         const extractedAppId = this._extractAppId(uniqueId);
 
-        // Get stored appId from watcher (may have been resolved from SNI Id previously)
-        const itemInfo = this._watcher?._items.get(uniqueId);
+        const itemInfo = this._watcher?.getItemInfo(uniqueId);
         const storedAppId = itemInfo?.appId;
 
-        // Check if either the extracted or stored appId is disabled
         if (disabledApps.includes(extractedAppId)) {
             debug(`Skipping disabled app: ${extractedAppId}`);
             return;
@@ -1709,23 +1654,18 @@ export default class StatusTrayExtension extends Extension {
             return;
         }
 
-        // Check if we already have this item
         if (this._items.has(uniqueId)) {
             debug(`Item already exists: ${uniqueId}`);
             return;
         }
 
-        // Create a TrayItem for it
         const trayItem = new TrayItem(busName, objectPath, this._settings);
         this._items.set(uniqueId, trayItem);
 
-        // Listen for appId resolution to update watcher's stored appId and reposition
         trayItem.connect('appid-resolved', (item, resolvedAppId) => {
             if (this._watcher) {
                 this._watcher.updateItemAppId(uniqueId, resolvedAppId);
             }
-            // Trigger a reorder to position the item correctly now that we have the real appId
-            // Use a short delay to batch multiple resolutions together
             if (this._reorderTimeoutId) {
                 GLib.source_remove(this._reorderTimeoutId);
             }
@@ -1736,11 +1676,9 @@ export default class StatusTrayExtension extends Extension {
             });
         });
 
-        // Determine position based on app-order setting (use stored appId if available)
         const appId = storedAppId || extractedAppId;
         const position = this._calculatePosition(appId);
 
-        // Add to panel
         Main.panel.addToStatusArea(`StatusTray-${uniqueId}`, trayItem, position, 'right');
         debug(`Added TrayItem: ${uniqueId} at position ${position}`);
     }
@@ -1765,13 +1703,10 @@ export default class StatusTrayExtension extends Extension {
     _refreshItems() {
         const disabledApps = this._settings.get_strv('disabled-apps');
 
-        // Remove items that are now disabled
         for (const [key, item] of this._items) {
             const appId = item._appId;
             if (disabledApps.includes(appId)) {
                 debug(`Removing disabled item: ${appId}`);
-                // Store the resolved appId in the watcher before destroying
-                // This ensures re-enabling uses the same appId
                 if (this._watcher) {
                     this._watcher.updateItemAppId(key, appId);
                 }
@@ -1780,12 +1715,11 @@ export default class StatusTrayExtension extends Extension {
             }
         }
 
-        // Re-add items that are now enabled (from watcher's list)
         let itemsAdded = false;
         if (this._watcher) {
             for (const uniqueId of this._watcher.RegisteredStatusNotifierItems) {
                 if (!this._items.has(uniqueId)) {
-                    const itemInfo = this._watcher._items.get(uniqueId);
+                    const itemInfo = this._watcher.getItemInfo(uniqueId);
                     if (itemInfo) {
                         this._onItemRegistered(uniqueId, itemInfo.busName, itemInfo.objectPath);
                         itemsAdded = true;
@@ -1794,11 +1728,12 @@ export default class StatusTrayExtension extends Extension {
             }
         }
 
-        // If items were added, reorder all to ensure correct positioning
-        // This is needed because GNOME Shell doesn't re-sort panel items when new ones are added
         if (itemsAdded) {
-            // Use a short delay to let the new items fully initialize
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+            if (this._reorderTimeoutId) {
+                GLib.source_remove(this._reorderTimeoutId);
+            }
+            this._reorderTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                this._reorderTimeoutId = null;
                 this._reorderItems();
                 return GLib.SOURCE_REMOVE;
             });
@@ -1886,7 +1821,7 @@ export default class StatusTrayExtension extends Extension {
         // Collect info from existing items (use their resolved _appId)
         const itemsInfo = [];
         for (const [uniqueId, trayItem] of this._items) {
-            const itemData = this._watcher._items.get(uniqueId);
+            const itemData = this._watcher.getItemInfo(uniqueId);
             if (itemData) {
                 itemsInfo.push({
                     uniqueId,
@@ -1903,7 +1838,6 @@ export default class StatusTrayExtension extends Extension {
         }
         this._items.clear();
 
-        // Sort by app-order using the resolved appIds
         const appOrder = this._settings.get_strv('app-order');
         itemsInfo.sort((a, b) => {
             const aIndex = appOrder.indexOf(a.appId);
@@ -1914,13 +1848,10 @@ export default class StatusTrayExtension extends Extension {
             return 0;
         });
 
-        // Re-create items in sorted order
-        // Position 0 = leftmost in the right box, higher positions = further right
         const disabledApps = this._settings.get_strv('disabled-apps');
         for (let i = 0; i < itemsInfo.length; i++) {
             const { uniqueId, busName, objectPath, appId } = itemsInfo[i];
 
-            // Skip disabled apps
             if (disabledApps.includes(appId)) {
                 continue;
             }
@@ -1928,15 +1859,12 @@ export default class StatusTrayExtension extends Extension {
             const trayItem = new TrayItem(busName, objectPath, this._settings);
             this._items.set(uniqueId, trayItem);
 
-            // Listen for appId resolution to update watcher's stored appId
             trayItem.connect('appid-resolved', (item, resolvedAppId) => {
                 if (this._watcher) {
                     this._watcher.updateItemAppId(uniqueId, resolvedAppId);
                 }
             });
 
-            // Use index as position - items are already sorted by app-order
-            // so index 0 gets position 0 (leftmost), etc.
             const position = i;
             Main.panel.addToStatusArea(`StatusTray-${uniqueId}`, trayItem, position, 'right');
             debug(`Reordered TrayItem: ${appId} at position ${position}`);
