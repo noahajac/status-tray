@@ -163,8 +163,11 @@ function stripMnemonics(label) {
  * Uses Gio.DBusProxy with interface info for more robust property handling,
  * especially for apps with non-standard SNI implementations.
  */
-const TrayItem = GObject.registerClass(
-class TrayItem extends PanelMenu.Button {
+const TrayItem = GObject.registerClass({
+    Signals: {
+        'appid-resolved': { param_types: [GObject.TYPE_STRING] },
+    },
+}, class TrayItem extends PanelMenu.Button {
     _init(busName, objectPath, settings) {
         // Extract a readable ID from the bus name or path for accessibility
         const itemId = this._extractId(busName, objectPath);
@@ -301,6 +304,8 @@ class TrayItem extends PanelMenu.Button {
                 const oldAppId = this._appId;
                 this._appId = sniId;
                 debug(`Updated appId from ${oldAppId} to ${this._appId} (from SNI Id)`);
+                // Notify extension that appId was resolved (for settings persistence)
+                this.emit('appid-resolved', this._appId);
             }
         }
 
@@ -621,6 +626,8 @@ class TrayItem extends PanelMenu.Button {
                         const oldAppId = this._appId;
                         this._appId = sniId;
                         debug(`Updated appId from ${oldAppId} to ${this._appId} (from SNI Id, fallback)`);
+                        // Notify extension that appId was resolved (for settings persistence)
+                        this.emit('appid-resolved', this._appId);
                     }
                 } catch (e) {
                     if (!e.message?.includes('CANCELLED')) {
@@ -1419,7 +1426,8 @@ class StatusNotifierWatcher {
             return;
         }
 
-        this._items.set(uniqueId, { busName, objectPath });
+        // Store item info with appId (will be updated later with SNI Id if available)
+        this._items.set(uniqueId, { busName, objectPath, appId: null });
 
         // Watch for the bus name to disappear
         const signalId = Gio.DBus.session.signal_subscribe(
@@ -1475,6 +1483,17 @@ class StatusNotifierWatcher {
 
         // Notify the extension
         this._extension._onItemUnregistered(uniqueId);
+    }
+
+    /**
+     * Update the stored appId for an item (called when TrayItem resolves SNI Id)
+     */
+    updateItemAppId(uniqueId, appId) {
+        const itemInfo = this._items.get(uniqueId);
+        if (itemInfo) {
+            itemInfo.appId = appId;
+            debug(`Watcher: updated appId for ${uniqueId} to ${appId}`);
+        }
     }
 
     /**
@@ -1641,11 +1660,21 @@ export default class StatusTrayExtension extends Extension {
     _onItemRegistered(uniqueId, busName, objectPath) {
         debug(`Item registered: ${uniqueId}`);
 
-        // Check if disabled in settings
+        // Check if disabled in settings - check both extracted appId and stored appId from watcher
         const disabledApps = this._settings.get_strv('disabled-apps');
-        const appId = this._extractAppId(uniqueId);
-        if (disabledApps.includes(appId)) {
-            debug(`Skipping disabled app: ${appId}`);
+        const extractedAppId = this._extractAppId(uniqueId);
+
+        // Get stored appId from watcher (may have been resolved from SNI Id previously)
+        const itemInfo = this._watcher?._items.get(uniqueId);
+        const storedAppId = itemInfo?.appId;
+
+        // Check if either the extracted or stored appId is disabled
+        if (disabledApps.includes(extractedAppId)) {
+            debug(`Skipping disabled app: ${extractedAppId}`);
+            return;
+        }
+        if (storedAppId && disabledApps.includes(storedAppId)) {
+            debug(`Skipping disabled app (stored): ${storedAppId}`);
             return;
         }
 
@@ -1659,7 +1688,15 @@ export default class StatusTrayExtension extends Extension {
         const trayItem = new TrayItem(busName, objectPath, this._settings);
         this._items.set(uniqueId, trayItem);
 
-        // Determine position based on app-order setting
+        // Listen for appId resolution to update watcher's stored appId
+        trayItem.connect('appid-resolved', (item, resolvedAppId) => {
+            if (this._watcher) {
+                this._watcher.updateItemAppId(uniqueId, resolvedAppId);
+            }
+        });
+
+        // Determine position based on app-order setting (use stored appId if available)
+        const appId = storedAppId || extractedAppId;
         const position = this._calculatePosition(appId);
 
         // Add to panel
@@ -1689,9 +1726,14 @@ export default class StatusTrayExtension extends Extension {
 
         // Remove items that are now disabled
         for (const [key, item] of this._items) {
-            const appId = this._extractAppId(key);
+            const appId = item._appId;
             if (disabledApps.includes(appId)) {
                 debug(`Removing disabled item: ${appId}`);
+                // Store the resolved appId in the watcher before destroying
+                // This ensures re-enabling uses the same appId
+                if (this._watcher) {
+                    this._watcher.updateItemAppId(key, appId);
+                }
                 item.destroy();
                 this._items.delete(key);
             }
@@ -1751,22 +1793,29 @@ export default class StatusTrayExtension extends Extension {
 
     /**
      * Calculate the panel position for a tray item based on app-order setting
-     * Lower positions appear further right in the panel (closer to system icons)
-     * Items not in app-order get position 0 (rightmost among Status Tray icons)
+     * Higher positions appear further LEFT in the panel (away from system icons)
+     * We use a base position to ensure tray icons appear left of system indicators
      */
     _calculatePosition(appId) {
-        const appOrder = this._settings.get_strv('app-order');
+        // Base position offset to place tray icons left of system indicators
+        // QuickSettings and other system indicators use low position values (0-1)
+        // By using a higher base, tray icons appear to their left
+        // Using a much higher value to ensure clear separation
+        const BASE_POSITION = 10;
 
-        // If appOrder is empty or app is not in the list, use position 0
+        const appOrder = this._settings.get_strv('app-order');
         const orderIndex = appOrder.indexOf(appId);
+
         if (orderIndex === -1) {
-            return 0;
+            // Items not in app-order get base position (leftmost among Status Tray icons
+            // but still to the left of system indicators)
+            return BASE_POSITION;
         }
 
         // Items at the start of app-order (index 0) should appear leftmost (higher position)
-        // Items at the end should appear rightmost (lower position)
+        // Items at the end should appear rightmost (lower position, but still > 0)
         // We reverse the index so first item in list gets highest position
-        return appOrder.length - orderIndex;
+        return BASE_POSITION + (appOrder.length - orderIndex);
     }
 
     /**

@@ -2,7 +2,7 @@
 
 A GNOME Shell extension that brings back the system tray for applications using StatusNotifierItem (AppIndicator/SNI) protocol.
 
-<!-- SCREENSHOT_PLACEHOLDER: Main screenshot showing Status Tray in action with several tray icons visible in the GNOME panel. Recommended size: 800x100px or similar showing just the panel area. Filename suggestion: screenshot-panel.png -->
+<!-- SCREENSHOT_PLACEHOLDER: Main screenshot showing Status Tray in action with several tray icons visible in the GNOME panel. Recommended size: 800x100px or similar showing just the panel area. Filename suggestion: screenshot-panel.png -->   
 
 ## Features
 

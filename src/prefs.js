@@ -653,11 +653,31 @@ const IconPickerDialog = GObject.registerClass({
         previewGroup.add(previewRow);
         this._previewRow = previewRow;
 
+        // Search and filter row
+        const filterBox = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 8,
+        });
+        content.append(filterBox);
+
         // Search entry
         const searchEntry = new Gtk.SearchEntry({
-            placeholder_text: 'Search icons (e.g., "cloud", "network", "mail")...',
+            placeholder_text: 'Search icons...',
+            hexpand: true,
         });
-        content.append(searchEntry);
+        filterBox.append(searchEntry);
+
+        // Category dropdown
+        const categoryModel = new Gtk.StringList();
+        categoryModel.append('Symbolic');
+        categoryModel.append('Applications');
+        categoryModel.append('All');
+
+        this._categoryDropdown = new Gtk.DropDown({
+            model: categoryModel,
+            selected: 0,
+        });
+        filterBox.append(this._categoryDropdown);
 
         // Scrolled window for icon grid
         const scrolled = new Gtk.ScrolledWindow({
@@ -682,12 +702,20 @@ const IconPickerDialog = GObject.registerClass({
         // Load all icons from the theme
         this._loadAllIcons();
 
+        // Store search entry reference for use in callbacks
+        this._searchEntry = searchEntry;
+
         // Populate with initial icons
-        this._populateIconGrid('');
+        this._populateIconGrid('', 0);
 
         // Connect search
         searchEntry.connect('search-changed', () => {
-            this._populateIconGrid(searchEntry.get_text());
+            this._populateIconGrid(searchEntry.get_text(), this._categoryDropdown.selected);
+        });
+
+        // Connect category dropdown
+        this._categoryDropdown.connect('notify::selected', () => {
+            this._populateIconGrid(searchEntry.get_text(), this._categoryDropdown.selected);
         });
 
         // Handle icon selection
@@ -756,7 +784,12 @@ const IconPickerDialog = GObject.registerClass({
         }
     }
 
-    _populateIconGrid(filter) {
+    /**
+     * Populate the icon grid based on search filter and category
+     * @param {string} filter - Search filter text
+     * @param {number} category - 0=Symbolic, 1=Applications, 2=All
+     */
+    _populateIconGrid(filter, category = 0) {
         // Clear existing children
         let child = this._iconGrid.get_first_child();
         while (child) {
@@ -766,49 +799,62 @@ const IconPickerDialog = GObject.registerClass({
         }
 
         const lowerFilter = filter.toLowerCase();
-
-        // Filter icons based on search
         let filteredIcons;
+
+        // Apply category filter first
+        let categoryFiltered;
+        switch (category) {
+            case 0: // Symbolic icons
+                categoryFiltered = this._allIcons.filter(name => name.endsWith('-symbolic'));
+                break;
+            case 1: // Application icons
+                categoryFiltered = this._allIcons.filter(name => {
+                    if (name.endsWith('-symbolic')) return false;
+                    // App icons use reverse-DNS naming or simple names
+                    if (name.startsWith('com.') || name.startsWith('org.') ||
+                        name.startsWith('io.') || name.startsWith('net.')) {
+                        return true;
+                    }
+                    // Include tray-specific icons
+                    if (name.includes('-tray')) return true;
+                    // Simple names without dashes (e.g., "bitwarden", "nextcloud")
+                    if (!name.includes('-')) return true;
+                    return false;
+                });
+                break;
+            case 2: // All icons
+            default:
+                categoryFiltered = this._allIcons;
+                break;
+        }
+
+        // Apply search filter
         if (filter.length === 0) {
-            // No filter - show common/useful icons for tray apps
-            const commonPatterns = [
-                'symbolic',  // Prefer symbolic icons
-            ];
-            const priorityIcons = [
-                'network-', 'cloud-', 'mail-', 'user-', 'folder-',
-                'emblem-', 'dialog-', 'preferences-', 'system-',
-                'audio-', 'battery-', 'bluetooth-', 'weather-',
-                'media-', 'document-', 'edit-', 'application-',
-            ];
-
-            // Get symbolic icons that match priority patterns
-            filteredIcons = this._allIcons.filter(name => {
-                if (!name.endsWith('-symbolic')) return false;
-                return priorityIcons.some(p => name.startsWith(p));
-            });
-
-            // Limit to reasonable number
-            filteredIcons = filteredIcons.slice(0, 100);
-
+            if (category === 0) {
+                // Symbolic: show common system icons by default
+                const priorityIcons = [
+                    'network-', 'cloud-', 'mail-', 'user-', 'folder-',
+                    'emblem-', 'dialog-', 'preferences-', 'system-',
+                    'audio-', 'battery-', 'bluetooth-', 'weather-',
+                    'media-', 'document-', 'edit-', 'application-',
+                ];
+                filteredIcons = categoryFiltered.filter(name =>
+                    priorityIcons.some(p => name.startsWith(p))
+                );
+            } else {
+                // Applications/All: show first N icons
+                filteredIcons = categoryFiltered;
+            }
+            filteredIcons = filteredIcons.slice(0, 150);
         } else if (filter.length < 2) {
             // Very short filter - don't search yet
             filteredIcons = [];
         } else {
-            // Search all icons
-            filteredIcons = this._allIcons.filter(name =>
+            // Search within category
+            filteredIcons = categoryFiltered.filter(name =>
                 name.toLowerCase().includes(lowerFilter)
             );
-
-            // Prioritize symbolic icons
-            filteredIcons.sort((a, b) => {
-                const aSymbolic = a.endsWith('-symbolic') ? 0 : 1;
-                const bSymbolic = b.endsWith('-symbolic') ? 0 : 1;
-                if (aSymbolic !== bSymbolic) return aSymbolic - bSymbolic;
-                return a.localeCompare(b);
-            });
-
-            // Limit results
-            filteredIcons = filteredIcons.slice(0, 100);
+            filteredIcons = filteredIcons.slice(0, 150);
         }
 
         // Add icons to grid
@@ -829,9 +875,17 @@ const IconPickerDialog = GObject.registerClass({
         }
 
         // Show message if no results
-        if (filteredIcons.length === 0 && filter.length >= 2) {
+        if (filteredIcons.length === 0) {
+            let message;
+            if (filter.length > 0 && filter.length < 2) {
+                message = 'Type at least 2 characters to search.';
+            } else if (filter.length >= 2) {
+                message = 'No icons found. Try a different search term.';
+            } else {
+                message = 'No icons available in this category.';
+            }
             const label = new Gtk.Label({
-                label: 'No icons found. Try a different search term.',
+                label: message,
                 css_classes: ['dim-label'],
             });
             const flowChild = new Gtk.FlowBoxChild({
@@ -1543,10 +1597,18 @@ export default class StatusTrayPreferences extends ExtensionPreferences {
             title: 'Status Tray',
             subtitle: 'Automatic system tray for StatusNotifierItem apps',
         });
-        aboutRow.add_prefix(new Gtk.Image({
-            icon_name: 'application-x-executable-symbolic',
+        // Load extension icon from assets folder
+        const iconPath = GLib.build_filenamev([this.path, 'assets', 'status-tray-dark.png']);
+        const iconFile = Gio.File.new_for_path(iconPath);
+        const aboutIcon = new Gtk.Image({
             pixel_size: 48,
-        }));
+        });
+        if (iconFile.query_exists(null)) {
+            aboutIcon.set_from_gicon(Gio.FileIcon.new(iconFile));
+        } else {
+            aboutIcon.set_from_icon_name('application-x-executable-symbolic');
+        }
+        aboutRow.add_prefix(aboutIcon);
         aboutGroup.add(aboutRow);
 
         const versionRow = new Adw.ActionRow({
