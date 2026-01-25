@@ -39,7 +39,7 @@ A GNOME Shell extension that brings back the system tray for applications using 
 
 ### From extensions.gnome.org (Recommended)
 
-[![Get it on GNOME Extensions](assets/get-it-on-ego.svg)](https://extensions.gnome.org/extension/9164/status-tray/)
+[<img alt="Get it on GNOME Extensions" height="100" src="https://raw.githubusercontent.com/keithvassallomt/status-tray/refs/heads/main/assets/get-it-on-ego.svg?sanitize=true">](https://extensions.gnome.org/extension/9164/status-tray/)
 
 ### Manual Installation
 
