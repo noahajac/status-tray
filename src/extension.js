@@ -20,6 +20,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
+import Gtk from 'gi://Gtk';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -38,6 +39,23 @@ const PIXMAPS_FORMAT = Cogl.PixelFormat.ARGB_8888;
 function debug(msg) {
     if (DEBUG) {
         console.log(`[StatusTray] ${msg}`);
+    }
+}
+
+/**
+ * Check if an icon exists in the system theme
+ * @param {string} iconName - Icon name to check
+ * @returns {boolean} - True if icon exists in theme
+ */
+function iconExistsInTheme(iconName) {
+    try {
+        const settings = St.Settings.get();
+        const iconTheme = new Gtk.IconTheme();
+        iconTheme.set_theme_name(settings.gtk_icon_theme);
+        return iconTheme.has_icon(iconName);
+    } catch (e) {
+        debug(`Error checking icon existence: ${e.message}`);
+        return false;
     }
 }
 
@@ -841,9 +859,15 @@ const TrayItem = GObject.registerClass({
             return;
         }
 
-        debug(`Using system icon theme lookup for: ${iconName}`);
-        this._icon.set_icon_name(iconName);
-        this._applySymbolicStyle();
+        // Check if icon exists in system theme before using it
+        if (iconExistsInTheme(iconName)) {
+            debug(`Using system icon theme lookup for: ${iconName}`);
+            this._icon.set_icon_name(iconName);
+            this._applySymbolicStyle();
+        } else {
+            debug(`Icon ${iconName} not found in theme, trying IconPixmap fallback`);
+            this._fetchIconPixmapWithFallback(iconName);
+        }
     }
 
     /**
