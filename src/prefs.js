@@ -1407,6 +1407,18 @@ export default class StatusTrayPreferences extends ExtensionPreferences {
             title: 'Tray Apps',
             description: 'Drag to reorder. Click the icon to customize. Toggle to show/hide.',
         });
+
+        const resetOrderButton = new Gtk.Button({
+            icon_name: 'edit-clear-all-symbolic',
+            tooltip_text: 'Reset icon order',
+            css_classes: ['flat'],
+        });
+        resetOrderButton.connect('clicked', () => {
+            this._settings.set_strv('app-order', []);
+            this._rebuildAppsGroup();
+        });
+        this._appsGroup.set_header_suffix(resetOrderButton);
+
         page.add(this._appsGroup);
 
         this._infoRow = new Adw.ActionRow({

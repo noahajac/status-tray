@@ -204,11 +204,9 @@ const TrayItem = GObject.registerClass({
 
         this._icon = new St.Icon({
             style_class: 'system-status-icon status-tray-icon',
-            fallback_icon_name: FALLBACK_ICON_NAME,
+            icon_name: FALLBACK_ICON_NAME,
         });
         this.add_child(this._icon);
-
-        this._icon.set_icon_name(FALLBACK_ICON_NAME);
 
         this.add_style_class_name('status-tray-button');
 
@@ -376,7 +374,15 @@ const TrayItem = GObject.registerClass({
                         debug(`Fallback override stored for ${this._appId}: ${overrideIcon}`);
                     } else {
                         debug(`Using icon override for ${this._appId}: ${overrideIcon}`);
-                        this._setIcon(overrideIcon);
+                        if (overrideIcon.startsWith('/')) {
+                            const file = Gio.File.new_for_path(overrideIcon);
+                            this._icon.set_gicon(new Gio.FileIcon({ file }));
+                            this._clearIconExcept('gicon');
+                        } else {
+                            this._icon.set_icon_name(overrideIcon);
+                            this._clearIconExcept('icon_name');
+                        }
+                        this._applySymbolicStyle();
                         return;
                     }
                 }
@@ -558,6 +564,7 @@ const TrayItem = GObject.registerClass({
                     } else {
                         debug(`No IconPixmap available, using system theme for: ${iconName}`);
                         this._icon.set_icon_name(iconName);
+                        this._clearIconExcept('icon_name');
                         this._applySymbolicStyle();
                     }
                 } catch (e) {
@@ -565,6 +572,7 @@ const TrayItem = GObject.registerClass({
                         debug(`IconPixmap failed for sandboxed app: ${e.message}`);
                         debug(`Falling back to system theme for: ${iconName}`);
                         this._icon.set_icon_name(iconName);
+                        this._clearIconExcept('icon_name');
                         this._applySymbolicStyle();
                     }
                 }
@@ -584,12 +592,11 @@ const TrayItem = GObject.registerClass({
             Gio.DBusSignalFlags.NONE,
             () => {
                 debug(`NewIcon signal for ${this._busName}`);
-                // Invalidate cached property and refetch
-                if (this._proxy) {
-                    this._proxy.set_cached_property('IconName', null);
-                    this._proxy.set_cached_property('IconPixmap', null);
-                }
-                this._updateIcon();
+                // Refetch icon directly from D-Bus rather than invalidating
+                // the proxy cache first — invalidating causes _updateIcon to
+                // see empty cache and take the slow async path, which creates
+                // a visible blank frame between the old and new icon.
+                this._fetchIconDirect();
             }
         );
         this._signalIds.push(newIconId);
@@ -783,17 +790,13 @@ const TrayItem = GObject.registerClass({
     _setIcon(iconName) {
         debug(`_setIcon called with: ${iconName}, themePath: ${this._iconThemePath}`);
 
-        this._icon.content = null;
-        this._icon.gicon = null;
-        this._icon.icon_name = null;
-        this._icon.set_size(-1, -1);
-
         if (iconName.startsWith('/')) {
             const file = Gio.File.new_for_path(iconName);
             if (file.query_exists(null)) {
                 debug(`Using absolute icon path: ${iconName}`);
                 const gicon = new Gio.FileIcon({ file });
                 this._icon.set_gicon(gicon);
+                this._clearIconExcept('gicon');
                 this._applySymbolicStyle();
                 return;
             } else {
@@ -816,6 +819,7 @@ const TrayItem = GObject.registerClass({
                     debug(`Found icon file at: ${path}`);
                     const gicon = new Gio.FileIcon({ file });
                     this._icon.set_gicon(gicon);
+                    this._clearIconExcept('gicon');
                     this._applySymbolicStyle();
                     return;
                 }
@@ -827,6 +831,7 @@ const TrayItem = GObject.registerClass({
             if (flatpakId && iconExistsInTheme(flatpakId)) {
                 debug(`Using Flatpak app icon: ${flatpakId}`);
                 this._icon.set_icon_name(flatpakId);
+                this._clearIconExcept('icon_name');
                 this._applySymbolicStyle();
                 return;
             }
@@ -839,6 +844,7 @@ const TrayItem = GObject.registerClass({
         if (iconExistsInTheme(iconName)) {
             debug(`Using system icon theme lookup for: ${iconName}`);
             this._icon.set_icon_name(iconName);
+            this._clearIconExcept('icon_name');
             this._applySymbolicStyle();
         } else {
             // Try Flatpak app ID as icon name before falling to pixmap
@@ -847,6 +853,7 @@ const TrayItem = GObject.registerClass({
                 if (flatpakId && iconExistsInTheme(flatpakId)) {
                     debug(`Using Flatpak app icon: ${flatpakId}`);
                     this._icon.set_icon_name(flatpakId);
+                    this._clearIconExcept('icon_name');
                     this._applySymbolicStyle();
                     return;
                 }
@@ -856,11 +863,29 @@ const TrayItem = GObject.registerClass({
         }
     }
 
+    // Clear icon properties that are NOT the active rendering source.
+    // This prevents ghost artifacts from previous icon modes without
+    // causing a blank frame by clearing the active source first.
+    _clearIconExcept(activeSource) {
+        if (activeSource !== 'content')
+            this._icon.content = null;
+        if (activeSource !== 'gicon')
+            this._icon.gicon = null;
+        if (activeSource !== 'icon_name')
+            this._icon.icon_name = null;
+        if (activeSource === 'icon_name')
+            this._icon.set_size(-1, -1);
+    }
+
     _applySymbolicStyle() {
+        const iconName = this._icon.icon_name;
+        const isSymbolicIcon = iconName && iconName.endsWith('-symbolic');
+        const iconStyleCss = isSymbolicIcon ? '' : ' -st-icon-style: regular;';
+
         const iconMode = this._settings?.get_string('icon-mode') ?? 'symbolic';
         if (iconMode !== 'symbolic') {
             this._icon.clear_effects();
-            this._icon.set_style('icon-size: 16px;');
+            this._icon.set_style(`icon-size: 16px;${iconStyleCss}`);
             return;
         }
 
@@ -921,7 +946,7 @@ const TrayItem = GObject.registerClass({
             }
         }
 
-        this._icon.set_style('icon-size: 16px;');
+        this._icon.set_style(`icon-size: 16px;${iconStyleCss}`);
     }
 
     _setIconFromPixmap(pixmapVariant) {
@@ -1017,8 +1042,7 @@ const TrayItem = GObject.registerClass({
                     content_gravity: Clutter.ContentGravity.RESIZE_ASPECT,
                 });
 
-                this._icon.gicon = null;
-                this._icon.icon_name = null;
+                this._clearIconExcept('content');
 
                 this._applySymbolicStyle();
                 debug(`Set IconPixmap via St.ImageContent for ${this._busName}`);
@@ -1057,8 +1081,7 @@ const TrayItem = GObject.registerClass({
             const file = Gio.File.new_for_path(tempPath);
             const gicon = new Gio.FileIcon({ file });
             this._icon.set_gicon(gicon);
-            this._icon.content = null;
-            this._icon.icon_name = null;
+            this._clearIconExcept('gicon');
             this._applySymbolicStyle();
 
             debug(`IconPixmap saved to ${tempPath} (fallback)`);
@@ -2076,35 +2099,24 @@ export default class StatusTrayExtension extends Extension {
     }
 
     /**
-     * Reorder all tray items based on current app-order setting
-     * Must destroy and recreate items because PanelMenu.Button can't be re-added
+     * Reorder tray items in the panel based on current app-order setting.
+     * Repositions existing widgets in the panel box rather than destroying
+     * and recreating them, which avoids a visible flash of all icons.
      */
     _reorderItems() {
         if (!this._watcher) return;
 
         debug('_reorderItems called');
 
-        const itemsInfo = [];
-        for (const [uniqueId, trayItem] of this._items) {
-            const itemData = this._watcher.getItemInfo(uniqueId);
-            if (itemData) {
-                itemsInfo.push({
-                    uniqueId,
-                    busName: itemData.busName,
-                    objectPath: itemData.objectPath,
-                    appId: trayItem._appId,  // Use resolved appId from TrayItem
-                });
-            }
-        }
-
-        for (const [key, item] of this._items) {
-            item._destroyedInternally = true;
-            item.destroy();
-        }
-        this._items.clear();
-
         const appOrder = this._settings.get_strv('app-order');
-        itemsInfo.sort((a, b) => {
+
+        // Build desired order from current items
+        const entries = [];
+        for (const [uniqueId, trayItem] of this._items) {
+            entries.push({ uniqueId, trayItem, appId: trayItem._appId });
+        }
+
+        entries.sort((a, b) => {
             const aIndex = appOrder.indexOf(a.appId);
             const bIndex = appOrder.indexOf(b.appId);
             if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
@@ -2113,35 +2125,32 @@ export default class StatusTrayExtension extends Extension {
             return 0;
         });
 
-        const disabledApps = this._settings.get_strv('disabled-apps');
-        for (let i = 0; i < itemsInfo.length; i++) {
-            const { uniqueId, busName, objectPath, appId } = itemsInfo[i];
-
-            if (disabledApps.includes(appId)) {
-                continue;
-            }
-
-            const trayItem = new TrayItem(busName, objectPath, this._settings);
-            this._items.set(uniqueId, trayItem);
-
-            trayItem.connect('appid-resolved', (item, resolvedAppId) => {
-                if (this._watcher) {
-                    this._watcher.updateItemAppId(uniqueId, resolvedAppId);
-                }
-            });
-
-            trayItem.connect('destroy', () => {
-                if (!trayItem._destroyedInternally && this._items.has(uniqueId)) {
-                    debug(`TrayItem externally destroyed: ${uniqueId}`);
-                    this._items.delete(uniqueId);
-                    if (this._watcher)
-                        this._watcher._removeItemTracking(uniqueId);
-                }
-            });
-
-            const position = i;
-            Main.panel.addToStatusArea(`StatusTray-${uniqueId}`, trayItem, position, 'right');
-            debug(`Reordered TrayItem: ${appId} at position ${position}`);
+        // Check if the order actually changed
+        const currentOrder = Array.from(this._items.keys());
+        const desiredOrder = entries.map(e => e.uniqueId);
+        if (currentOrder.length === desiredOrder.length &&
+            currentOrder.every((id, i) => id === desiredOrder[i])) {
+            debug('_reorderItems: order unchanged, skipping');
+            return;
         }
+
+        // Reposition existing widgets within the panel box
+        const rightBox = Main.panel._rightBox;
+        for (let i = 0; i < entries.length; i++) {
+            const { trayItem } = entries[i];
+            const container = trayItem.container || trayItem;
+            if (container.get_parent() === rightBox) {
+                rightBox.set_child_at_index(container, i);
+            }
+        }
+
+        // Rebuild the Map in the new order
+        const reordered = new Map();
+        for (const { uniqueId, trayItem } of entries) {
+            reordered.set(uniqueId, trayItem);
+        }
+        this._items = reordered;
+
+        debug(`Reordered ${entries.length} items without recreation`);
     }
 }
