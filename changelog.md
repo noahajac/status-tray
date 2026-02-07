@@ -13,6 +13,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - Fixed icon tint effect not applying on GNOME 48+.
 - Fixed stale/broken tray icons after suspend/resume. The extension now runs a health check on startup that detects and removes ghost icons left behind by apps (especially Flatpak apps) that didn't survive sleep properly.
+- Fixed certain icons having a '...' icon background. 
 
 ## [1.0] - 2026-01-25
 
