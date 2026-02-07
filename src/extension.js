@@ -921,14 +921,20 @@ const TrayItem = GObject.registerClass({
 
         if (useTint && tintColor) {
             try {
-                const colorize = new Clutter.ColorizeEffect({
-                    tint: Clutter.Color.new(
+                let color;
+                if (Cogl.Color.prototype.init_from_4f) {
+                    color = new Cogl.Color();
+                    color.init_from_4f(tintColor[0], tintColor[1], tintColor[2], 1.0);
+                } else {
+                    color = Clutter.Color.new(
                         Math.round(tintColor[0] * 255),
                         Math.round(tintColor[1] * 255),
                         Math.round(tintColor[2] * 255),
                         255
-                    ),
-                });
+                    );
+                }
+                const colorize = new Clutter.ColorizeEffect();
+                colorize.set_tint(color);
                 this._icon.add_effect_with_name('tint', colorize);
             } catch (e) {
                 debug(`Failed to apply tint effect: ${e.message}`);
