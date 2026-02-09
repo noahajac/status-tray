@@ -26,7 +26,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
-const DEBUG = false;
+const DEBUG = true;
 const FALLBACK_ICON_NAME = 'image-loading-symbolic';
 const PIXMAPS_FORMAT = Cogl.PixelFormat.ARGB_8888;
 
@@ -34,6 +34,49 @@ function debug(msg) {
     if (DEBUG) {
         console.log(`[StatusTray] ${msg}`);
     }
+}
+
+// Resolve the full theme inheritance chain by reading Inherits= from
+// each theme's index.theme.  Returns a deduped ordered list of theme names.
+function _resolveThemeChain(themeName, iconDirs) {
+    const visited = new Set();
+    const chain = [];
+    const queue = [themeName];
+
+    while (queue.length > 0) {
+        const name = queue.shift();
+        if (visited.has(name))
+            continue;
+        visited.add(name);
+        chain.push(name);
+
+        for (const baseDir of iconDirs) {
+            const indexPath = `${baseDir}/${name}/index.theme`;
+            if (!GLib.file_test(indexPath, GLib.FileTest.EXISTS))
+                continue;
+            try {
+                const [ok, contents] = GLib.file_get_contents(indexPath);
+                if (!ok) continue;
+                const text = new TextDecoder().decode(contents);
+                const match = text.match(/^Inherits\s*=\s*(.+)$/m);
+                if (match) {
+                    const parents = match[1].split(',').map(s => s.trim()).filter(s => s);
+                    for (const p of parents) {
+                        if (!visited.has(p))
+                            queue.push(p);
+                    }
+                }
+            } catch (e) {
+                // ignore unreadable index files
+            }
+            break; // found this theme's index, no need to check other dirs
+        }
+    }
+
+    // Always include hicolor as ultimate fallback
+    if (!visited.has('hicolor'))
+        chain.push('hicolor');
+    return chain;
 }
 
 function findIconInTheme(iconName) {
@@ -45,20 +88,30 @@ function findIconInTheme(iconName) {
         iconDirs.push('/var/lib/flatpak/exports/share/icons');
         iconDirs.push(`${GLib.get_home_dir()}/.local/share/icons`);
 
-        const themes = [themeName, 'hicolor'];
-        const subdirs = [
-            'scalable/apps', 'scalable/status',
-            '48x48/apps', '32x32/apps', '24x24/apps', '22x22/apps', '16x16/apps',
-        ];
+        const themes = _resolveThemeChain(themeName, iconDirs);
+        const categories = ['apps', 'status', 'legacy', 'devices', 'actions'];
+        const subdirs = [];
+        for (const cat of categories) {
+            subdirs.push(`scalable/${cat}`);
+            subdirs.push(`symbolic/${cat}`);
+            for (const sz of ['48x48', '32x32', '24x24', '22x22', '16x16'])
+                subdirs.push(`${sz}/${cat}`);
+        }
         const exts = ['.svg', '.png'];
+        // Also try the -symbolic variant as a fallback for standard icon names
+        const names = [iconName];
+        if (!iconName.endsWith('-symbolic'))
+            names.push(`${iconName}-symbolic`);
 
-        for (const baseDir of iconDirs) {
-            for (const theme of themes) {
-                for (const subdir of subdirs) {
-                    for (const ext of exts) {
-                        const path = `${baseDir}/${theme}/${subdir}/${iconName}${ext}`;
-                        if (GLib.file_test(path, GLib.FileTest.EXISTS))
-                            return path;
+        for (const name of names) {
+            for (const baseDir of iconDirs) {
+                for (const theme of themes) {
+                    for (const subdir of subdirs) {
+                        for (const ext of exts) {
+                            const path = `${baseDir}/${theme}/${subdir}/${name}${ext}`;
+                            if (GLib.file_test(path, GLib.FileTest.EXISTS))
+                                return path;
+                        }
                     }
                 }
             }
@@ -848,21 +901,12 @@ const TrayItem = GObject.registerClass({
             this._clearIconExcept('gicon');
             this._applySymbolicStyle();
         } else {
-            // Try Flatpak app ID as icon name before falling to pixmap
-            if (this._iconThemePath) {
-                const flatpakId = extractFlatpakAppId(this._iconThemePath);
-                const flatpakIconPath2 = flatpakId ? findIconInTheme(flatpakId) : null;
-                if (flatpakIconPath2) {
-                    debug(`Using Flatpak app icon: ${flatpakId} (${flatpakIconPath2})`);
-                    const file = Gio.File.new_for_path(flatpakIconPath2);
-                    this._icon.set_gicon(new Gio.FileIcon({ file }));
-                    this._clearIconExcept('gicon');
-                    this._applySymbolicStyle();
-                    return;
-                }
-            }
-            debug(`Icon ${iconName} not found in theme, trying IconPixmap fallback`);
-            this._fetchIconPixmapWithFallback(iconName);
+            // Let St.Icon / GTK resolve the icon via the full theme engine
+            // (handles inheritance, legacy dirs, symbolic fallbacks, etc.)
+            debug(`Using GTK icon resolution for: ${iconName}`);
+            this._icon.set_icon_name(iconName);
+            this._clearIconExcept('icon_name');
+            this._applySymbolicStyle();
         }
     }
 
@@ -901,7 +945,12 @@ const TrayItem = GObject.registerClass({
     _applySymbolicStyle() {
         const iconName = this._icon.icon_name;
         const isSymbolicIcon = iconName && iconName.endsWith('-symbolic');
-        const iconStyleCss = isSymbolicIcon ? '' : ' -st-icon-style: regular;';
+        // Only force regular style when we loaded a file via gicon — this
+        // prevents St from re-interpreting the raster/SVG as symbolic.
+        // When using icon_name (GTK theme lookup), let St.Icon decide so it
+        // can fall back to -symbolic variants for icons like battery-full.
+        const usingGicon = this._icon.gicon != null;
+        const iconStyleCss = (usingGicon && !isSymbolicIcon) ? ' -st-icon-style: regular;' : '';
 
         const iconMode = this._settings?.get_string('icon-mode') ?? 'symbolic';
         if (iconMode !== 'symbolic') {
